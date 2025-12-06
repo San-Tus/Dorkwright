@@ -61,7 +61,7 @@ dorkwright.py --input-file file_links.txt --download-dir my_files
 
 ---
 
-## 🛠 Installation
+## Installation
 
 ```bash
 git clone https://github.com/San-Tus/Dorkwright
