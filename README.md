@@ -19,7 +19,7 @@ It uses **Playwright** for browser automation and includes CAPTCHA handling, pro
 
 ## Usage
 
-```yml
+```
 usage: dorkwright.py [-h] [-q QUERY] [-p N] [-d SECONDS] [-o FILE] [--download] [--download-dir DIR] [--input-file FILE]
 
 ╔═══════════════════════════════════════════════════════════════════════════════╗
