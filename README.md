@@ -66,8 +66,8 @@ dorkwright.py --input-file file_links.txt --download-dir my_files
 ## 🛠 Installation
 
 ```bash
-git clone <repo>
-cd <repo>
+git clone https://github.com/San-Tus/Dorkwright
+cd Dorkwright
 python -m venv .venv
 ```
 
