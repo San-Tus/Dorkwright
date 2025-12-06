@@ -20,8 +20,6 @@ It uses **Playwright** for browser automation and includes CAPTCHA handling, pro
 ## Usage
 
 ```
-usage: dorkwright.py [-h] [-q QUERY] [-p N] [-d SECONDS] [-o FILE] [--download] [--download-dir DIR] [--input-file FILE]
-
 ╔═══════════════════════════════════════════════════════════════════════════════╗
 ║                          DORKWRIGHT - Google Dorker                           ║
 ║         Extract file links from Google search results and download them       ║
