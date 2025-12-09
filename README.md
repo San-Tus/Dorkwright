@@ -37,7 +37,7 @@ options:
   --download-dir DIR    Directory to save downloaded files (default: downloads)
   --input-file FILE     Input file with URLs to download (skip search if provided)
   --proxy URL           Proxy server URL (e.g., http://127.0.0.1:8080)
-  --flaresolverr URL    FlareSolverr API endpoint for bypassing Cloudflare
+  --flaresolverr URL    FlareSolverr endpoint for bypassing Cloudflare
 ```
 
 ---
