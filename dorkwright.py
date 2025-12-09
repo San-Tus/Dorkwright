@@ -636,7 +636,7 @@ USAGE EXAMPLES:
     parser.add_argument(
         "--flaresolverr",
         metavar="URL",
-        help="FlareSolverr API endpoint for bypassing Cloudflare (e.g., http://localhost:8191)\n\n",
+        help="FlareSolverr endpoint for bypassing Cloudflare (e.g., http://localhost:8191)\n\n",
     )
 
     args = parser.parse_args()
