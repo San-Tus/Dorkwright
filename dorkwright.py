@@ -154,7 +154,6 @@ def sanitize_filename(filename: str) -> str:
     Removes or replaces invalid characters.
     """
     # Windows forbidden characters: < > : " / \ | ? *
-    # Also remove control characters
     invalid_chars = '<>:"|?*'
 
     for char in invalid_chars:
@@ -207,11 +206,7 @@ def sanitize_filename(filename: str) -> str:
 
 
 def is_file_link(url: str) -> bool:
-    """
-    Check if URL appears to be a direct file link.
-    Uses a heuristic: looks for a file extension (dot followed by 2-5 alphanumeric chars)
-    at the end of the path or before query/fragment.
-    """
+    """Determine if a URL points to a file based on its extension."""
     url_lower = url.lower()
     parsed = urlparse(url_lower)
     path = parsed.path
@@ -244,7 +239,63 @@ def save_links(links: list, output_file: str):
     print(f"\nSaved {len(links)} links to {output_file}")
 
 
-def download_files(input_file: str, output_dir: str):
+def download_with_flaresolverr(url: str, flaresolverr_url: str, timeout: int = 60):
+    """Download a file using FlareSolverr to bypass Cloudflare challenges."""
+    try:
+        # Step 1: Use FlareSolverr to solve Cloudflare challenge
+        payload = {
+            "cmd": "request.get",
+            "url": url,
+            "maxTimeout": timeout * 1000,  # Convert to milliseconds
+        }
+
+        headers = {"Content-Type": "application/json"}
+
+        flaresolverr_response = requests.post(
+            f"{flaresolverr_url}/v1",
+            headers=headers,
+            json=payload,
+            timeout=timeout + 10
+        )
+        flaresolverr_response.raise_for_status()
+
+        result = flaresolverr_response.json()
+
+        if result.get("status") == "ok":
+            solution = result.get("solution", {})
+
+            # Extract cookies and user agent from FlareSolverr response
+            cookies_list = solution.get("cookies", [])
+            user_agent = solution.get("userAgent", "")
+
+            # Convert cookies list to dict for requests
+            cookies = {cookie["name"]: cookie["value"] for cookie in cookies_list}
+
+            # Step 2: Make actual download request with solved cookies
+            download_headers = {
+                "User-Agent": user_agent
+            }
+
+            actual_response = requests.get(
+                url,
+                headers=download_headers,
+                cookies=cookies,
+                stream=True,
+                timeout=timeout
+            )
+            actual_response.raise_for_status()
+
+            return actual_response
+        else:
+            print(f"FlareSolverr error: {result.get('message', 'Unknown error')}")
+            return None
+
+    except Exception as e:
+        print(f"FlareSolverr request failed: {e}")
+        return None
+
+
+def download_files(input_file: str, output_dir: str, proxy: str | None = None, flaresolverr_url: str | None = None):
     # Create output directory
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
@@ -262,6 +313,18 @@ def download_files(input_file: str, output_dir: str):
 
     print(f"Found {len(urls)} URLs to download")
     print(f"Saving to directory: {output_dir}")
+
+    # Setup proxy configuration
+    proxies = None
+    if proxy:
+        proxies = {
+            'http': proxy,
+            'https': proxy
+        }
+        print(f"Using proxy: {proxy}")
+
+    if flaresolverr_url:
+        print(f"Using FlareSolverr: {flaresolverr_url}")
 
     success_count = 0
     failed_count = 0
@@ -289,15 +352,20 @@ def download_files(input_file: str, output_dir: str):
             filename = None
             try:
                 # Download file with progress bar
-                response = requests.get(url, timeout=30, stream=True)
-                response.raise_for_status()
+                # Use FlareSolverr if configured, otherwise use regular requests (with proxy if configured)
+                if flaresolverr_url:
+                    response = download_with_flaresolverr(url, flaresolverr_url)
+                    if response is None:
+                        raise requests.RequestException("FlareSolverr download failed")
+                else:
+                    response = requests.get(url, timeout=30, stream=True, proxies=proxies)
+                    response.raise_for_status()
 
                 # Determine filename from Content-Disposition header if available
                 content_disposition = response.headers.get("Content-Disposition", "")
                 if content_disposition:
                     # Try to extract filename from Content-Disposition header
-                    # Format: attachment; filename="example.pdf" or filename*=UTF-8''example.pdf
-                    # First try RFC 5987 encoded filename (filename*=UTF-8''...)
+                    # RFC 5987 encoded filename (filename*=UTF-8''...) << Seems OK
                     filename_match = re.search(
                         r"filename\*=UTF-8''([^;]+)", content_disposition
                     )
@@ -493,6 +561,12 @@ USAGE EXAMPLES:
   ─────────────────────────────────────────────────────────────────────────────
   %(prog)s --input-file file_links.txt --download-dir my_files
 
+  Download with proxy or FlareSolverr (for Cloudflare bypass):
+  ─────────────────────────────────────────────────────────────────────────────
+  %(prog)s --input-file file_links.txt --proxy http://127.0.0.1:8080
+  %(prog)s --input-file file_links.txt --flaresolverr http://localhost:8191
+  %(prog)s -q "site:example.com filetype:pdf" --download --flaresolverr http://localhost:8191
+
 ═══════════════════════════════════════════════════════════════════════════════════
         """,
     )
@@ -552,11 +626,24 @@ USAGE EXAMPLES:
         help="Input file with URLs to download (skip search if provided)\n\n",
     )
 
+    # Proxy options
+    parser.add_argument(
+        "--proxy",
+        metavar="URL",
+        help="Proxy server URL (e.g., http://127.0.0.1:8080, socks5://127.0.0.1:1080)\n\n",
+    )
+
+    parser.add_argument(
+        "--flaresolverr",
+        metavar="URL",
+        help="FlareSolverr API endpoint for bypassing Cloudflare (e.g., http://localhost:8191)\n\n",
+    )
+
     args = parser.parse_args()
 
     # Mode 1: Download from existing file
     if args.input_file:
-        download_files(args.input_file, args.download_dir)
+        download_files(args.input_file, args.download_dir, args.proxy, args.flaresolverr)
         return
 
     # Mode 2: Search and optionally download
@@ -588,7 +675,7 @@ USAGE EXAMPLES:
         # Download if requested
         if args.download:
             print(f"\nStarting downloads...\n")
-            download_files(args.output, args.download_dir)
+            download_files(args.output, args.download_dir, args.proxy, args.flaresolverr)
         else:
             print(f"\nYou can download all files with:")
             print(

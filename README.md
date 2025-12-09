@@ -13,6 +13,8 @@ It uses **Playwright** for browser automation and includes CAPTCHA handling, pro
 * CAPTCHA-aware (waits for user to solve)
 * Saves results to an output file
 * Bulk download support
+* Proxy support for downloads
+* FlareSolverr integration for bypassing Cloudflare protection
 * Fast and Playwright-powered
 
 ---
@@ -26,14 +28,16 @@ It uses **Playwright** for browser automation and includes CAPTCHA handling, pro
 ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 options:
-  -h, --help           show this help message and exit
-  -q, --query QUERY    Google search query (e.g., "site:example.com filetype:doc")
-  -p, --pages N        Maximum number of result pages to scrape (default: 10)
-  -d, --delay SECONDS  Delay between page requests to avoid CAPTCHA (default: 3)
-  -o, --output FILE    Output file for extracted links (default: file_links.txt)
-  --download           Download files after extracting links
-  --download-dir DIR   Directory to save downloaded files (default: downloads)
-  --input-file FILE    Input file with URLs to download (skip search if provided)
+  -h, --help            show this help message and exit
+  -q, --query QUERY     Google search query (e.g., "site:example.com filetype:doc")
+  -p, --pages N         Maximum number of result pages to scrape (default: 10)
+  -d, --delay SECONDS   Delay between page requests to avoid CAPTCHA (default: 3)
+  -o, --output FILE     Output file for extracted links (default: file_links.txt)
+  --download            Download files after extracting links
+  --download-dir DIR    Directory to save downloaded files (default: downloads)
+  --input-file FILE     Input file with URLs to download (skip search if provided)
+  --proxy URL           Proxy server URL (e.g., http://127.0.0.1:8080)
+  --flaresolverr URL    FlareSolverr API endpoint for bypassing Cloudflare
 ```
 
 ---
@@ -59,6 +63,26 @@ dorkwright.py -q "site:example.com filetype:doc" --download --download-dir downl
 dorkwright.py --input-file file_links.txt --download-dir my_files
 ```
 
+### **Download with proxy**
+
+```bash
+# Using HTTP proxy
+dorkwright.py --input-file file_links.txt --proxy http://127.0.0.1:8080
+
+# Using SOCKS5 proxy
+dorkwright.py --input-file file_links.txt --proxy socks5://127.0.0.1:1080
+```
+
+### **Download with FlareSolverr (Cloudflare bypass)**
+
+```bash
+# Download from existing file using FlareSolverr
+dorkwright.py --input-file file_links.txt --flaresolverr http://localhost:8191
+
+# Search and download with FlareSolverr
+dorkwright.py -q "site:example.com filetype:pdf" --download --flaresolverr http://localhost:8191
+```
+
 ---
 
 ## Installation
@@ -82,6 +106,15 @@ Install required packages:
 pip install -r requirements.txt
 playwright install chromium
 ```
+
+---
+
+## FlareSolverr Setup (Optional)
+
+FlareSolverr is a proxy server that solves Cloudflare challenges, allowing you to download files from Cloudflare-protected sites.
+
+For installation and setup instructions, follow the official documentation:
+https://github.com/FlareSolverr/FlareSolverr
 
 ---
 
