@@ -1,3 +1,5 @@
 /.venv
 /file_links.txt
 **download**
+*.txt
+!requirements.txt
