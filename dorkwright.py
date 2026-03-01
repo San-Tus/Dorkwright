@@ -239,7 +239,7 @@ def save_links(links: list, output_file: str):
     print(f"\nSaved {len(links)} links to {output_file}")
 
 
-def download_with_flaresolverr(url: str, flaresolverr_url: str, timeout: int = 60):
+def download_with_flaresolverr(url: str, flaresolverr_url: str, headers: dict = None, timeout: int = 60):
     """Download a file using FlareSolverr to bypass Cloudflare challenges."""
     try:
         # Step 1: Use FlareSolverr to solve Cloudflare challenge
@@ -271,10 +271,11 @@ def download_with_flaresolverr(url: str, flaresolverr_url: str, timeout: int = 6
             # Convert cookies list to dict for requests
             cookies = {cookie["name"]: cookie["value"] for cookie in cookies_list}
 
-            # Step 2: Make actual download request with solved cookies
             download_headers = {
                 "User-Agent": user_agent
             }
+            if headers:
+                download_headers.update(headers)
 
             actual_response = requests.get(
                 url,
@@ -472,11 +473,48 @@ def download_files(input_file: str, output_dir: str, proxy: str | None = None, f
                     colour="cyan",
                     ncols=100,
                 ) as pbar_file:
-                    with open(output_path, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                                pbar_file.update(len(chunk))
+                    downloaded_size = 0
+                    mode = "wb"
+                    max_retries = 5
+                    retry_count = 0
+                    
+                    while True:
+                        try:
+                            with open(output_path, mode) as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if chunk:
+                                        f.write(chunk)
+                                        downloaded_size += len(chunk)
+                                        pbar_file.update(len(chunk))
+                            
+                            # Check if download has full file (some servers might have problems with content length)
+                            if total_size > 0 and downloaded_size < total_size:
+                                raise requests.exceptions.ChunkedEncodingError(f"Incomplete read: got {downloaded_size} of {total_size} bytes")
+                            
+                            break  # success
+                            
+                        except requests.RequestException as e:
+                            retry_count += 1
+                            if retry_count > max_retries:
+                                raise  # max retries exceeded
+                                
+                            if total_size == 0 and downloaded_size > 0:
+                                raise
+                            
+                            # short pause before retry (1 or 2 seconds sould be OK-ish)
+                            time.sleep(2)
+                            
+                            # resume
+                            resume_headers = {"Range": f"bytes={downloaded_size}-"}
+                            mode = "ab"  # append to the existing file
+                            
+                            if flaresolverr_url:
+                                response = download_with_flaresolverr(url, flaresolverr_url, headers=resume_headers)
+                                if response is None:
+                                    raise requests.RequestException("FlareSolverr resume download failed")
+                            else:
+                                response = requests.get(url, headers=resume_headers, timeout=30, stream=True, proxies=proxies)
+                                response.raise_for_status()
 
                 file_size = os.path.getsize(output_path)
                 total_bytes += file_size
