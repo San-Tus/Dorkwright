@@ -60,12 +60,26 @@ async def extract_file_links(query: str, max_pages: int = 10, delay: int = 3):
                 # Wait a bit for dynamic content
                 await page.wait_for_timeout(2000)
 
-                # Check for CAPTCHA
-                page_content = await page.content()
-                if (
-                    "recaptcha" in page_content.lower()
-                    or "captcha" in page_content.lower()
-                ):
+                # Check for CAPTCHA — use URL and visible elements, not raw HTML,
+                # because google included CAPTCHA scripts on every bloody results page.
+                current_url = page.url
+                is_captcha = "/sorry/" in current_url or "google.com/sorry" in current_url
+                if not is_captcha:
+                    # Check for visible CAPTCHA challenge elements
+                    is_captcha = await page.evaluate(
+                        """
+                        () => {
+                            // Actual challenge form (not just a script tag)
+                            if (document.querySelector('form#captcha-form')) return true;
+                            if (document.querySelector('.g-recaptcha')) return true;
+                            if (document.querySelector('[data-sitekey]')) return true;
+                            // Google's "unusual traffic" interstitial
+                            if (document.querySelector('#infoDiv')) return true;
+                            return false;
+                        }
+                        """
+                    )
+                if is_captcha:
                     print("\n" + "=" * 60)
                     print("CAPTCHA DETECTED!")
                     print("Please solve the CAPTCHA in the browser window.")
