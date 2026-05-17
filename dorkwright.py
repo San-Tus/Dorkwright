@@ -5,7 +5,7 @@ import asyncio
 import os
 import re
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 from playwright.async_api import async_playwright
 import requests
 from tqdm import tqdm
@@ -14,6 +14,7 @@ from tqdm import tqdm
 async def extract_file_links(query: str, max_pages: int = 10, delay: int = 3):
 
     file_links = set()
+    query_filetypes = extract_query_filetypes(query)
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=False)
@@ -28,7 +29,7 @@ async def extract_file_links(query: str, max_pages: int = 10, delay: int = 3):
             try:
                 # Construct Google search URL
                 start = page_num * 10
-                search_url = f"https://www.google.com/search?q={query}&start={start}"
+                search_url = f"https://www.google.com/search?q={quote_plus(query)}&start={start}"
 
                 print(f"Searching page {page_num + 1}...", flush=True)
                 await page.goto(search_url, wait_until="networkidle", timeout=30000)
@@ -88,21 +89,59 @@ async def extract_file_links(query: str, max_pages: int = 10, delay: int = 3):
                     input()  # Wait for user to press Enter
                     await page.wait_for_timeout(2000)
 
-                # Extract all links from search results
-                links = await page.evaluate(
+                # Extract links together with nearby result text. Google may show
+                # file results whose destination URL has no extension, e.g.
+                # /document_2671 with a visible "PDF" badge in the result card.
+                candidates = await page.evaluate(
                     """
                     () => {
-                        const anchors = document.querySelectorAll('a');
-                        return Array.from(anchors).map(a => a.href);
+                        const resultSelectors = [
+                            'div.g',
+                            'div.MjjYud',
+                            '[data-sokoban-container]',
+                            'div[data-header-feature]'
+                        ];
+
+                        const resultContainerFor = (anchor) => {
+                            for (const selector of resultSelectors) {
+                                const container = anchor.closest(selector);
+                                if (container) return container;
+                            }
+                            return anchor.parentElement;
+                        };
+
+                        return Array.from(document.querySelectorAll('a[href]')).map(a => {
+                            const container = resultContainerFor(a);
+                            return {
+                                href: a.href,
+                                hasHeading: Boolean(a.querySelector('h3')),
+                                anchorText: a.innerText || '',
+                                resultText: container ? (container.innerText || '') : ''
+                            };
+                        });
                     }
                 """
                 )
 
-                # Filter for direct file links
-                for link in links:
-                    if is_file_link(link):
-                        clean_link = clean_google_url(link)
-                        if clean_link:
+                # Filter for direct file links and Google-labeled file results
+                for candidate in candidates:
+                    clean_link = clean_google_url(candidate.get("href", ""))
+                    if not clean_link:
+                        continue
+
+                    result_text = " ".join(
+                        [
+                            candidate.get("anchorText", ""),
+                            candidate.get("resultText", ""),
+                        ]
+                    )
+
+                    is_google_labeled_file = candidate.get(
+                        "hasHeading"
+                    ) and is_labeled_file_result(result_text, query_filetypes)
+
+                    if is_file_link(clean_link) or is_google_labeled_file:
+                        if clean_link not in file_links:
                             file_links.add(clean_link)
                             print(f"  Found: {clean_link}")
 
@@ -142,19 +181,49 @@ async def extract_file_links(query: str, max_pages: int = 10, delay: int = 3):
 def clean_google_url(url: str) -> str:
     # Google often wraps URLs like: /url?q=https://example.com/file.pdf&sa=...
     if "/url?q=" in url or "/url?url=" in url:
-        match = re.search(r"[?&](?:q|url)=([^&]+)", url)
-        if match:
-            return unquote(match.group(1))
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        for param in ("q", "url"):
+            if params.get(param):
+                url = params[param][0]
+                break
 
     # If it's already a direct URL
-    if url.startswith("http"):
-        return url
+    if not url.startswith("http"):
+        return None
 
-    return None
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "google.com" or hostname.endswith(".google.com"):
+        return None
+
+    return unquote(url)
+
+
+def extract_query_filetypes(query: str) -> set[str]:
+    return {
+        match.lower()
+        for match in re.findall(r"\bfiletype:([a-z0-9]{2,5})\b", query, re.IGNORECASE)
+    }
+
+
+def is_labeled_file_result(result_text: str, query_filetypes: set[str]) -> bool:
+    #Detect Google result cards that show a visible file type label
+    if not query_filetypes:
+        return False
+
+    text = result_text.lower()
+    for filetype in query_filetypes:
+        # Google file badges appear as a short standalone thing nex to the file link: 
+        # PDF, OFFICE-X, etc. Require token boundaries to avoid matching prose.
+        if re.search(rf"(^|[^a-z0-9]){re.escape(filetype)}([^a-z0-9]|$)", text):
+            return True
+
+    return False
 
 
 def format_size(bytes_size: float) -> str:
-    """Convert bytes to human-readable format"""
+    # Convert bytes to human-readable format
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes_size < 1024.0:
             return f"{bytes_size:.2f} {unit}"
@@ -163,10 +232,7 @@ def format_size(bytes_size: float) -> str:
 
 
 def sanitize_filename(filename: str) -> str:
-    """
-    Sanitize filename for Windows/Unix compatibility.
-    Removes or replaces invalid characters.
-    """
+    # Sanitize filename for Windows/Unix compatibility + replaces shits
     # Windows forbidden characters: < > : " / \ | ? *
     invalid_chars = '<>:"|?*'
 
